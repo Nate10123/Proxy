@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {validateTarget,isPublicIPv4,relayLink,GET} from './app/proxy/route.ts';
+import {validateTarget,isPublicIPv4,relayLink} from './lib/proxy-target.ts';
+import {GET} from './app/proxy/route.ts';
 for(const target of ['http://localhost','http://127.0.0.1','http://10.0.0.1','file:///etc/passwd','https://user:pass@example.com','http://foo.internal','https://example.com:8080'])assert.throws(()=>validateTarget(target));
 assert.equal(validateTarget('https://example.com/a').hostname,'example.com');
 for(const ip of ['127.0.0.1','10.1.1.1','192.168.1.1','172.16.0.1','169.254.169.254','100.64.0.1','198.18.0.1'])assert.equal(isPublicIPv4(ip),false);
@@ -10,4 +11,8 @@ const original=globalThis.fetch;let calls=0;
 globalThis.fetch=async(url)=>{calls++;if(String(url).includes('dns-query'))return Response.json({Answer:[{type:1,data:'93.184.216.34'}]});return new Response('hello',{headers:{'content-type':'text/plain'}})};
 const ok=await GET(new Request('https://drift.example/proxy?url=https://example.com'));assert.equal(await ok.text(),'hello');assert.equal(calls,2);assert.match(ok.headers.get('content-security-policy'),/sandbox/);
 globalThis.fetch=async()=>Response.json({Answer:[{type:1,data:'127.0.0.1'}]});assert.equal((await GET(new Request('https://drift.example/proxy?url=https://example.com'))).status,502);
+globalThis.fetch=async(url)=>String(url).includes('dns-query')?Response.json({Answer:[{type:1,data:'93.184.216.34'}]}):new Response('<html><head><style>body{background:url(/bg.png)}</style><script>alert(1)</script></head><body onload="bad()"><a href="/next">Next</a><img src="/image.png" srcset="bad"><form><input><p>Read me</p></form></body></html>',{headers:{'content-type':'text/html'}});
+const html=await (await GET(new Request('https://drift.example/proxy?url=https://example.com'))).text();
+assert.match(html,/Read me/);assert.match(html,/url=https%3A%2F%2Fexample.com%2Fnext/);assert.match(html,/url=https%3A%2F%2Fexample.com%2Fimage.png/);assert.match(html,/url=https%3A%2F%2Fexample.com%2Fbg.png/);
+assert.doesNotMatch(html,/<script|<form|<input|onload=|srcset=/);
 globalThis.fetch=original;console.log('Proxy validation, private-address blocking, URL rewriting, and relay tests passed.');
